@@ -169,6 +169,12 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
 
     def localUrl = "src/main/cpp/bootstrap-" + arch + ".zip"
     def file = new File(projectDir, localUrl)
+    // dsh-android: 打种模式（构建时加 -PdshSeededBootstrap）下本地 zip 存在即直接使用，
+    // 跳过远程下载与校验和比对——seed-bootstrap.sh 产物的 hash 必然与官方 checksum 不同。
+    if (project.hasProperty("dshSeededBootstrap") && file.exists()) {
+        logger.quiet("dshSeededBootstrap: using pre-seeded " + localUrl + ", skipping download and checksum")
+        return
+    }
     if (file.exists()) {
         def buffer = new byte[8192]
         def input = new FileInputStream(file)

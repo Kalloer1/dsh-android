@@ -124,9 +124,20 @@ jobs:
           if [ -f scripts/seed-bootstrap.sh ]; then
             echo "Found scripts/seed-bootstrap.sh, running it"
             bash scripts/seed-bootstrap.sh
+            echo "GRADLE_SEED_PROP=-PdshSeededBootstrap" >> "$GITHUB_ENV"
           else
-            echo "scripts/seed-bootstrap.sh not present yet; gradle task downloadBootstraps will fetch bootstrap zips from termux-packages releases"
+            echo "scripts/seed-bootstrap.sh not present yet; will fetch official bootstrap zips"
+            echo "GRADLE_SEED_PROP=" >> "$GITHUB_ENV"
           fi
+
+      - name: Fetch/validate bootstrap zips
+        shell: bash {0}
+        run: |
+          set -e
+          # 上游把 downloadBootstraps 挂在 javaCompile 之前，但 NDK 编译（incbin 需要 zip）
+          # 先于 javaCompile 调度，全新 checkout 直接 assembleRelease 会报
+          # "Could not find incbin file 'bootstrap-aarch64.zip'"。必须显式先跑本任务。
+          ./gradlew $GRADLE_SEED_PROP downloadBootstraps
 
       - name: Build release APK (unsigned at this stage)
         shell: bash {0}
@@ -163,7 +174,7 @@ jobs:
           export TERMUX_PACKAGE_VARIANT="$PACKAGE_VARIANT"              # Used by app/build.gradle
           # release 构建默认 TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS=0（F-Droid 兼容），
           # 所以只产出一个 universal APK
-          if ! ./gradlew assembleRelease; then
+          if ! ./gradlew $GRADLE_SEED_PROP assembleRelease; then
             exit_on_error "Build failed for '$APK_VERSION_TAG' release build."
           fi
 
