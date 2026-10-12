@@ -11,7 +11,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_termux_app_TermuxInstaller_getZip(JNIEnv *
     return ret;
 }
 
-JNIEXPORT jint JNICALL Java_com_termux_app_TermuxInstaller_getZipSize(JNIEnv *env, __attribute__((__unused__)) jobject This)
+JNIEXPORT jint JNICALL Java_com_termux_app_TermuxInstaller_getZipSize(__attribute__((__unused__)) JNIEnv *env, __attribute__((__unused__)) jobject This)
 {
     return blob_size;
 }
