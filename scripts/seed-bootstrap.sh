@@ -30,6 +30,9 @@ APT_BASE="${APT_BASE:-https://packages.termux.dev/apt/termux-main}"
 TUNA_APT="${TUNA_APT:-https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 DSH_PKG="${DSH_PKG:-@deepseek-ai/dsh@0.2.0-rc.2}"
+DSH_VER="${DSH_PKG##*@}"
+PLUGIN_FREE_MODEL="${PLUGIN_FREE_MODEL:-dsh-our-free-model@2.1.0}"
+PLUGIN_MOBILE_UI="${PLUGIN_MOBILE_UI:-dsh-web-mobile@3.0.6}"
 ROOT_DEBS="${ROOT_DEBS:-nodejs}"              # 打种根包（逗号分隔；Termux 的 nodejs 自带 npm）
 WORK="${WORK:-$REPO_ROOT/build/seed-$ARCH}"
 
@@ -172,7 +175,9 @@ inject_dsh(){
     local ok=0 reg
     for reg in "${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" "$NPM_REGISTRY"; do
         log "尝试从 $reg 安装 $DSH_PKG"
-        if npm install --prefix "$WORK/stage" --no-audit --no-fund --registry="$reg" "$DSH_PKG"; then
+        # -g + --prefix：产物落 stage/lib/node_modules（$PREFIX 布局），
+        # 不带 -g 的 --prefix 是局部语义会落 stage/node_modules（错误布局）
+        if npm install -g --prefix "$WORK/stage" --no-audit --no-fund --registry="$reg" "$DSH_PKG"; then
             ok=1; break
         fi
         log "源 $reg 失败，清理后换源重试"
@@ -197,6 +202,53 @@ EOF
     [[ -f "$WORK/stage/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" ]] \
         || { log "错误：dsh 安装后未找到 lib/bin.js（检查包版本/registry）"; exit 1; }
     du -sh "$WORK/stage/lib/node_modules"
+}
+
+# ---- e2. dsh home 打种：预初始化 web profile + 内置两插件（免 pnpm、免 symlink）----
+# 配方出处：docs/INTEGRATION-dsh.md §3.2（插件 README 官方离线铺法）：
+#   文件铺进 profiles/web/node_modules/<插件>/ + package.json dependencies 登记
+#   + dsh.profile.bundles 末尾追加。禁止 cordis.patch.yml 重复注册、禁止任何 symlink。
+# 产物放进 prefix 的 share/dsh-seed/home/.dsh（zip 只含 prefix 相对路径，$HOME 在 prefix 外，
+# 由 DshWebService 启动时 cp -rn 展开）。
+inject_dsh_profiles(){
+    command -v npm >/dev/null || { log "错误：CI 缺少 npm"; exit 1; }
+    local seed="$WORK/dshseed/home/.dsh"
+    rm -rf "$WORK/dshseed"
+    mkdir -p "$seed/profiles/web"
+
+    log "以 --no-bin-links 预装 web profile（扁平 node_modules、零 symlink）"
+    ( cd "$seed/profiles/web" && npm install --no-bin-links --no-audit --no-fund \
+        --registry="${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" \
+        "@deepseek-ai/dsh-base@${DSH_VER}" "@deepseek-ai/dsh-web-app@${DSH_VER}" \
+        "$PLUGIN_FREE_MODEL" "$PLUGIN_MOBILE_UI" )
+    # profile 根文件（对齐 dsh 自动生成版的注释壳）
+    cat > "$seed/profiles/web/cordis.yml" <<'EOF'
+# dsh profile root — the tree is composed as patches: each bundle in
+# package.json's dsh.profile.bundles, then cordis.patch.yml, then overlays.
+[]
+EOF
+    printf '[]\n' > "$seed/profiles/web/cordis.patch.yml"
+    node -e '
+const fs=require("fs");const p=process.argv[1];
+const d=JSON.parse(fs.existsSync(p)?fs.readFileSync(p,"utf8"):"{}");
+d.name="dsh-profile-web"; d.private=true; d.version=d.version||"1.0.0";
+d.dependencies=d.dependencies||{};
+d.dsh={...(d.dsh||{}),profile:{...(d.dsh.profile||{}),bundles:[
+  "@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","dsh-our-free-model","dsh-web-mobile"]}};
+fs.writeFileSync(p,JSON.stringify(d,null,2));
+' "$seed/profiles/web/package.json"
+    # 内置插件必设 managed，禁插件自升级与 APK 受管更新打架（§3.3）
+    mkdir -p "$seed/our-free-model"
+    printf '{\n  "distribution": "managed"\n}\n' > "$seed/our-free-model/settings.json"
+    # 首启设置：预记欢迎公告版本，跳过弹窗
+    printf 'ui-onboarding:\n  welcomeNoticeVersion: "2026-08-13.1"\n' > "$seed/settings.yaml"
+    # 硬闸：全树不允许出现 symlink（profile 闸门遇到外来链接拒启）
+    local links; links=$(find "$seed" -type l | wc -l)
+    [[ "$links" -eq 0 ]] || { log "错误：种子树含 $links 个 symlink，违反 profile 闸门"; find "$seed" -type l | head; exit 1; }
+    mkdir -p "$WORK/stage/share"
+    rm -rf "$WORK/stage/share/dsh-seed"
+    cp -a "$WORK/dshseed/home" "$WORK/stage/share/dsh-seed"
+    du -sh "$WORK/stage/share/dsh-seed"
 }
 
 # ---- f. 重新打包回 build.gradle 期望的文件名，放回 cpp/ ----
@@ -224,6 +276,7 @@ main(){
     run_step "c. 下载 deb 并合并文件树"       download_debs_extract
     run_step "d. 注入 TUNA apt 源"            inject_sources_list
     run_step "e. 注入 dsh CLI"                inject_dsh
+    run_step "e2. dsh home 打种(profile+插件)" inject_dsh_profiles
     run_step "f. 重新打包并放回 cpp/"          repack
     log "全部完成，总用时 $(( SECONDS - t0 ))s"
     log "构建：./gradlew assembleRelease -PdshSeededBootstrap（跳过下载与校验，直接用打种 zip）"
