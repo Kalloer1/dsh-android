@@ -130,8 +130,13 @@ download_debs_extract(){
         tmp="$WORK/debroot/$i"
         rm -rf "$tmp"; mkdir -p "$tmp"
         dpkg-deb --extract "$out" "$tmp"
-        if [[ -d "$tmp/data/data/com.termux/files" ]]; then
-            cp -a "$tmp/data/data/com.termux/files/." "$WORK/stage/"
+        # Termux deb 的 data.tar 路径实测为 usr/bin/node（前缀多一层 usr/，home/ 在
+        # prefix 外忽略）；个别打包形态可能直接是 data/data/com.termux/files/usr/...
+        # 或已经 prefix 相对。三种布局逐一识别后统一剥到 stage 根。
+        if [[ -d "$tmp/data/data/com.termux/files/usr" ]]; then
+            cp -a "$tmp/data/data/com.termux/files/usr/." "$WORK/stage/"
+        elif [[ -d "$tmp/usr" ]]; then
+            cp -a "$tmp/usr/." "$WORK/stage/"
         else
             cp -a "$tmp/." "$WORK/stage/"
         fi
