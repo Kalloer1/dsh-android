@@ -1,0 +1,270 @@
+# =====================================================================
+# dsh-android fork —— GitHub Actions 云构建：签名 release APK
+#
+# 触发：
+#   - push 到 dsh-android 分支  -> 构建并上传 workflow artifact
+#   - push tag v*               -> 构建并上传 artifact + 创建 GitHub Release
+#
+# 签名方案（不改 app/build.gradle，CI 即可闭环）：
+#   现状：app/build.gradle 的 buildTypes.release（第 90-94 行）没有挂
+#   signingConfig，所以 ./gradlew assembleRelease 产出的是【未签名】APK。
+#   本 workflow 在 gradle 构建之后直接用 build-tools 的 apksigner 签名：
+#     1) 若四个 secrets（DSH_KEYSTORE_BASE64 / DSH_KEYSTORE_PASSWORD /
+#        DSH_KEY_ALIAS / DSH_KEY_PASSWORD）齐全 -> 用 release keystore 正式签名；
+#     2) 任一缺失 -> 优雅降级：用仓库自带的 app/testkey_untrusted.jks
+#        （与 debug 构建同一把 key，Termux 上游标记为 untrusted）签名，
+#        并在 Job summary / Release 正文里明确说明该包仅供侧载测试、
+#        不可用于正式发布。
+#   生成正式 keystore 与填 secrets 的步骤见 .github/keystore-README.md。
+#
+# 【可选 diff —— 如需本地 ./gradlew assembleRelease 直接出签名包才加，
+#  CI 不需要，请勿在无人复核时改动；由仓库主手动落地】
+#   文件：app/build.gradle
+#   位置一：第 87 行（signingConfigs 块的收尾 "}"）之前插入，
+#   即加在 debug { ... } 段之后、仍在 signingConfigs 内：
+#     --- old
+#         signingConfigs {
+#             debug {
+#                 storeFile file('testkey_untrusted.jks')
+#                 keyAlias 'alias'
+#                 storePassword 'xrj45yWGLbsO7W0v'
+#                 keyPassword 'xrj45yWGLbsO7W0v'
+#             }
+#         }
+#     --- new
+#         signingConfigs {
+#             debug {
+#                 storeFile file('testkey_untrusted.jks')
+#                 keyAlias 'alias'
+#                 storePassword 'xrj45yWGLbsO7W0v'
+#                 keyPassword 'xrj45yWGLbsO7W0v'
+#             }
+#             release {
+#                 def ksPath = System.getenv("DSH_KEYSTORE_FILE")
+#                 if (ksPath) {
+#                     storeFile file(ksPath)
+#                     storePassword System.getenv("DSH_KEYSTORE_PASSWORD") ?: ""
+#                     keyAlias System.getenv("DSH_KEY_ALIAS") ?: ""
+#                     keyPassword System.getenv("DSH_KEY_PASSWORD") ?: ""
+#                 }
+#             }
+#         }
+#   位置二：第 90-94 行 buildTypes.release 块整体替换（新增最后一行 if）：
+#     --- old
+#             release {
+#                 minifyEnabled true
+#                 shrinkResources false // Reproducible builds
+#                 proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+#             }
+#     --- new
+#             release {
+#                 minifyEnabled true
+#                 shrinkResources false // Reproducible builds
+#                 proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+#                 if (System.getenv("DSH_KEYSTORE_FILE")) {
+#                     signingConfig signingConfigs.release
+#                 }
+#             }
+# =====================================================================
+
+name: DSH Android Release Build
+
+on:
+  push:
+    branches:
+      - dsh-android
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dsh-android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_VARIANT: apt-android-7
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+
+      - name: Setup java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          # 官方 debug_build.yml 本身没有缓存配置；这里按标准做法加：
+          # cache: 'gradle' 会缓存 ~/.gradle（wrapper dists + caches + build cache）
+          cache: 'gradle'
+
+      - name: Install Android SDK components
+        shell: bash {0}
+        run: |
+          set -e
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          # 对齐 gradle.properties: compileSdkVersion=36, ndkVersion=29.0.14206865
+          # AGP 8.13.2 要求 build-tools >= 36.0.0（缺哪个补哪个，已装则秒过）
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865"
+
+      - name: Seed bootstrap (if script exists)
+        shell: bash {0}
+        run: |
+          set -e
+          if [ -f scripts/seed-bootstrap.sh ]; then
+            echo "Found scripts/seed-bootstrap.sh, running it"
+            bash scripts/seed-bootstrap.sh
+          else
+            echo "scripts/seed-bootstrap.sh not present yet; gradle task downloadBootstraps will fetch bootstrap zips from termux-packages releases"
+          fi
+
+      - name: Build release APK (unsigned at this stage)
+        shell: bash {0}
+        run: |
+          exit_on_error() { echo "$1"; exit 1; }
+
+          echo "Setting vars"
+          CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
+          CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" ./app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
+
+          if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            # tag push：直接用 tag 名（形如 v0.118.0）作为版本
+            RELEASE_VERSION_NAME="$GITHUB_REF_NAME"
+          else
+            # 分支 push：CURRENT_VERSION_NAME+<last_commit_hash>，照抄官方 debug_build.yml 的做法
+            RELEASE_VERSION_NAME="v${CURRENT_VERSION_NAME}+${GITHUB_SHA:0:7}"
+          fi
+          if ! printf "%s" "${RELEASE_VERSION_NAME/v/}" | grep -qP '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'; then
+            exit_on_error "The versionName '${RELEASE_VERSION_NAME/v/}' is not a valid semver."
+          fi
+
+          APK_DIR_PATH="./app/build/outputs/apk/release"
+          APK_VERSION_TAG="$RELEASE_VERSION_NAME-$PACKAGE_VARIANT-github-release"
+          APK_BASENAME_PREFIX="termux-app_$APK_VERSION_TAG"
+
+          echo "RELEASE_VERSION_NAME=$RELEASE_VERSION_NAME" >> "$GITHUB_ENV"
+          echo "APK_DIR_PATH=$APK_DIR_PATH" >> "$GITHUB_ENV"
+          echo "APK_VERSION_TAG=$APK_VERSION_TAG" >> "$GITHUB_ENV"
+          echo "APK_BASENAME_PREFIX=$APK_BASENAME_PREFIX" >> "$GITHUB_ENV"
+
+          echo "Building release APK for '$APK_VERSION_TAG'"
+          export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}"   # Used by app/build.gradle
+          export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG"              # Used by app/build.gradle
+          export TERMUX_PACKAGE_VARIANT="$PACKAGE_VARIANT"              # Used by app/build.gradle
+          # release 构建默认 TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS=0（F-Droid 兼容），
+          # 所以只产出一个 universal APK
+          if ! ./gradlew assembleRelease; then
+            exit_on_error "Build failed for '$APK_VERSION_TAG' release build."
+          fi
+
+          echo "Validating APK"
+          if ! test -f "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk"; then
+            files_found="$(ls "$APK_DIR_PATH" 2>/dev/null)"
+            exit_on_error "Failed to find built APK at '$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk'. Files found: "$'\n'"$files_found"
+          fi
+
+      - name: Sign APK
+        shell: bash {0}
+        env:
+          KEYSTORE_B64: ${{ secrets.DSH_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.DSH_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.DSH_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.DSH_KEY_PASSWORD }}
+        run: |
+          set -e
+          APK="$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          if ! test -x "$APKSIGNER"; then
+            # build-tools 装了新版本时兜底找一遍
+            APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)"
+          fi
+
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KS_PASS" ] && [ -n "$KS_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo "Signing with release keystore from secrets"
+            KEYSTORE_KIND="release"
+            TMPKS="$(mktemp -d)"
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$TMPKS/release.keystore"
+            "$APKSIGNER" sign \
+              --ks "$TMPKS/release.keystore" \
+              --ks-pass pass:"$KS_PASS" \
+              --ks-key-alias "$KS_ALIAS" \
+              --key-pass pass:"$KEY_PASS" \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              "$APK"
+            rm -rf "$TMPKS"
+          else
+            echo "Release keystore secrets missing, falling back to app/testkey_untrusted.jks (debug-grade untrusted key)"
+            KEYSTORE_KIND="untrusted-testkey"
+            "$APKSIGNER" sign \
+              --ks app/testkey_untrusted.jks \
+              --ks-pass pass:xrj45yWGLbsO7W0v \
+              --key-pass pass:xrj45yWGLbsO7W0v \
+              --ks-key-alias alias \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              "$APK"
+            {
+              echo "## ⚠️ 未使用正式签名"
+              echo ""
+              echo "本 APK 用仓库自带的 \`app/testkey_untrusted.jks\`（与 debug 构建同款、Termux 上游标记为 untrusted 的测试 key）签名。"
+              echo "仅可用于侧载功能测试，**不可用于正式发布**：设置正式签名 secrets 后重装会因签名不同而失败。"
+              echo "生成正式 keystore 并配置四个 secrets 的方法见 \`.github/keystore-README.md\`。"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "KEYSTORE_KIND=$KEYSTORE_KIND" >> "$GITHUB_ENV"
+
+          echo "Verifying signature"
+          "$APKSIGNER" verify --print-certs "$APK"
+
+          echo "Generating sha256sums (after signing)"
+          (cd "$APK_DIR_PATH" && sha256sum "${APK_BASENAME_PREFIX}_universal.apk" > "${APK_BASENAME_PREFIX}_sha256sums")
+
+          {
+            echo "## 构建结果"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 版本 | \`$RELEASE_VERSION_NAME\` |"
+            echo "| 包变体 | \`$PACKAGE_VARIANT\` |"
+            echo "| 签名方式 | \`$KEYSTORE_KIND\` |"
+            echo "| APK | \`$APK\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach universal APK artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.APK_BASENAME_PREFIX }}_universal
+          path: |
+            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_universal.apk
+            ${{ env.APK_DIR_PATH }}/output-metadata.json
+
+      - name: Attach sha256sums artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.APK_BASENAME_PREFIX }}_sha256sums
+          path: ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_sha256sums
+
+      - name: Attach to GitHub Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_universal.apk
+            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_sha256sums
+          body: |
+            dsh-android release 构建（fork 自 termux-app，本地跑 dsh web 的手机端）。
+
+            - 版本：`${{ env.RELEASE_VERSION_NAME }}`，包变体：`${{ env.PACKAGE_VARIANT }}`
+            - 签名方式：`${{ env.KEYSTORE_KIND }}`
+            ${{ env.KEYSTORE_KIND == 'untrusted-testkey' && '- ⚠️ 本包用 untrusted 测试 key（testkey_untrusted.jks）签名，仅供侧载测试，正式 key 配置见 .github/keystore-README.md' || '- ✅ 本包使用 release keystore 正式签名' }}
+
+            安装前先卸载其它签名的同包名（com.termux）应用。验收线见 README-dsh-android.md。
