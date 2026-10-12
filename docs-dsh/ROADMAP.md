@@ -14,8 +14,8 @@
 - 构建 #7：首次带 e3/e4 补丁步全链验证
 
 ## 待办（按优先级）
-1. 真机验收（scripts/device-check.sh 已备）：需手机 Termux 开 sshd 或直接侧载 APK
-2. ABI 拆分瘦身（universal 里 arm/i686/x86_64 bootstrap 约 88MB 冗余，TERMUX_SPLIT_APKS + 只打 aarch64 种）
+1. 真机验收：雷电模拟器 Android 14 x86_64（root 已开）跑 #10 双 ABI APK；mi8 待用户决定是否卸载官方 Termux
+2. ~~ABI 拆分瘦身~~ 已改双 ABI 打种（aarch64+x86_64）；32 位 arm/i686 维持官方 bootstrap（无 dsh，超旧设备不在射程）
 3. 免费渠道真机点亮：`/v1/models` 出现 EAC 模型 + GitHub 授权闸门全流程（vault 判定 web profile 应放行，未实锤）
 4. rc.2 顶栏重叠已知 issue #202 → 补丁层插件 dsh-android-patch（client 注入形状已从 dsh-web-mobile@3.0.6 解出，未建工程）
 5. MIUI 自启动白名单实测（mi8 即 MIUI，验收不过再特判）

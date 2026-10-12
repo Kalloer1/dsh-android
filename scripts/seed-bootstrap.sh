@@ -16,7 +16,10 @@ run_step(){
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GRADLE_FILE="$REPO_ROOT/app/build.gradle"
-ARCH="${ARCH:-aarch64}"                       # aarch64 / arm / i686 / x86_64
+# 打种覆盖的 ABI（顺序敏感：第一个是"主架构"，dsh/profiles 树只在它上面构建一次再复制）
+ARCHS="${ARCHS:-aarch64 x86_64}"
+ARCH="$ARCHS"                       # 循环里被逐个赋值；此处给默认
+PRIMARY_ARCH="${PRIMARY_ARCH:-aarch64}"
 
 # ---- 版本参数化：默认从 build.gradle 的 apt-android-7 分支读取，可用 BOOTSTRAP_VERSION 覆盖 ----
 BASE_VER="$(sed -n 's/.*def version = "\([0-9][^"]*\)".*apt\.android-7.*/\1/p' "$GRADLE_FILE" | head -n1)"
@@ -267,9 +270,24 @@ patch_android(){
 # ---- e4. 交叉编译 bionic flock addon（NDK 在场才跑；产物随 e3 的 loader 补丁生效）----
 build_flock_addon(){
     local node_ver
-    node_ver=$(sed -n 's|.*nodejs/nodejs_\([0-9.]*\)-[0-9]*_aarch64.deb.*|\1|p' "$WORK/closure.tsv" | head -1)
-    STAGE="$WORK/stage" WORK="$WORK/flockbuild" NODE_VER="${node_ver:-${NODE_VER:-26.4.0}}" \
+    node_ver=$(sed -n "s|.*nodejs/nodejs_\([0-9.]*\)-[0-9a-z]*_${ARCH}.deb.*|\1|p" "$WORK/closure.tsv" | head -1)
+    STAGE="$WORK/stage" WORK="$WORK/flockbuild" NODE_VER="${node_ver:-${NODE_VER:-26.4.0}}" ARCH="$ARCH" \
         bash "$REPO_ROOT/scripts/build-flock-addon-android.sh"
+}
+
+# ---- c2. 把主架构已建好的 dsh 纯 JS 树/种子/镜像配置复制到其它架构 stage ----
+copy_dsh_tree(){
+    local src dst
+    src="$REPO_ROOT/build/seed-$PRIMARY_ARCH/stage"
+    dst="$WORK/stage"
+    [[ "$dst" != "$src" ]] || return 0
+    log "复制 dsh 树：$src -> $dst"
+    rm -rf "$dst/lib/node_modules" "$dst/share/dsh-seed"
+    cp -a "$src/lib/node_modules" "$dst/lib/node_modules"
+    cp -a "$src/bin/dsh" "$dst/bin/dsh"
+    cp -a "$src/etc/npmrc" "$dst/etc/npmrc"
+    mkdir -p "$dst/share"
+    cp -a "$src/share/dsh-seed" "$dst/share/dsh-seed"
 }
 
 # ---- f. 重新打包回 build.gradle 期望的文件名，放回 cpp/ ----
@@ -290,21 +308,30 @@ repack(){
 
 main(){
     local t0=$SECONDS
-    run_step "a. 下载官方 bootstrap (${BOOTSTRAP_VERSION})" fetch_bootstrap
-    run_step "a2. 解包 bootstrap"            unpack_bootstrap
-    run_step "b. 拉取 Packages 索引"          fetch_packages
-    run_step "b2. 解析依赖闭包 (${ROOT_DEBS})" resolve_closure
-    run_step "c. 下载 deb 并合并文件树"       download_debs_extract
-    run_step "d. 注入 TUNA apt 源"            inject_sources_list
-    run_step "e. 注入 dsh CLI"                inject_dsh
-    run_step "e2. dsh home 打种(profile+插件)" inject_dsh_profiles
-    run_step "e3. Android 持久层补丁"          patch_android
-    if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
-        run_step "e4. 编译 bionic flock addon" build_flock_addon
-    else
-        log "e4 跳过：无 ANDROID_NDK_HOME（本机模式，loader 将走 no-op 锁兜底）"
-    fi
-    run_step "f. 重新打包并放回 cpp/"          repack
+    for a in $ARCHS; do
+        ARCH="$a"
+        WORK="$REPO_ROOT/build/seed-$ARCH"
+        log "=== ABI $ARCH (WORK=$WORK) ==="
+        run_step "a. 下载官方 bootstrap (${BOOTSTRAP_VERSION})" fetch_bootstrap
+        run_step "a2. 解包 bootstrap"            unpack_bootstrap
+        run_step "b. 拉取 Packages 索引"          fetch_packages
+        run_step "b2. 解析依赖闭包 (${ROOT_DEBS})" resolve_closure
+        run_step "c. 下载 deb 并合并文件树"       download_debs_extract
+        run_step "d. 注入 TUNA apt 源"            inject_sources_list
+        if [[ "$ARCH" == "$PRIMARY_ARCH" ]]; then
+            run_step "e. 注入 dsh CLI"                inject_dsh
+            run_step "e2. dsh home 打种(profile+插件)" inject_dsh_profiles
+        else
+            run_step "c2. 复制 dsh 树自 $PRIMARY_ARCH" copy_dsh_tree
+        fi
+        if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+            run_step "e4. 编译 bionic flock addon ($ARCH)" build_flock_addon
+        else
+            log "e4 跳过：无 ANDROID_NDK_HOME（本机模式，loader 将走 no-op 锁兜底）"
+        fi
+        run_step "e3. Android 持久层补丁 ($ARCH)" patch_android
+        run_step "f. 重新打包并放回 cpp/ ($ARCH)" repack
+    done
     log "全部完成，总用时 $(( SECONDS - t0 ))s"
     log "构建：./gradlew assembleRelease -PdshSeededBootstrap（跳过下载与校验，直接用打种 zip）"
 }
