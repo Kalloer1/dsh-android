@@ -207,6 +207,7 @@ jobs:
             printf '%s' "$KEYSTORE_B64" | base64 -d > "$TMPKS/release.keystore"
             "$APKSIGNER" sign \
               --ks "$TMPKS/release.keystore" \
+              --ks-type PKCS12 \
               --ks-pass pass:"$KS_PASS" \
               --ks-key-alias "$KS_ALIAS" \
               --key-pass pass:"$KEY_PASS" \

@@ -177,7 +177,7 @@ inject_dsh(){
         log "尝试从 $reg 安装 $DSH_PKG"
         # -g + --prefix：产物落 stage/lib/node_modules（$PREFIX 布局），
         # 不带 -g 的 --prefix 是局部语义会落 stage/node_modules（错误布局）
-        if npm install -g --prefix "$WORK/stage" --no-audit --no-fund --registry="$reg" "$DSH_PKG"; then
+        if npm install -g --prefix "$WORK/stage" --no-audit --no-fund --omit=optional --registry="$reg" "$DSH_PKG"; then
             ok=1; break
         fi
         log "源 $reg 失败，清理后换源重试"
@@ -217,7 +217,7 @@ inject_dsh_profiles(){
     mkdir -p "$seed/profiles/web"
 
     log "以 --no-bin-links 预装 web profile（扁平 node_modules、零 symlink）"
-    ( cd "$seed/profiles/web" && npm install --no-bin-links --no-audit --no-fund \
+    ( cd "$seed/profiles/web" && npm install --no-bin-links --no-audit --no-fund --omit=optional \
         --registry="${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" \
         "@deepseek-ai/dsh-base@${DSH_VER}" "@deepseek-ai/dsh-web-app@${DSH_VER}" \
         "$PLUGIN_FREE_MODEL" "$PLUGIN_MOBILE_UI" )
@@ -233,7 +233,8 @@ const fs=require("fs");const p=process.argv[1];
 const d=JSON.parse(fs.existsSync(p)?fs.readFileSync(p,"utf8"):"{}");
 d.name="dsh-profile-web"; d.private=true; d.version=d.version||"1.0.0";
 d.dependencies=d.dependencies||{};
-d.dsh={...(d.dsh||{}),profile:{...(d.dsh.profile||{}),bundles:[
+const prof=(d.dsh&&d.dsh.profile)||{};
+d.dsh={...(d.dsh||{}),profile:{...prof,bundles:[
   "@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","dsh-our-free-model","dsh-web-mobile"]}};
 fs.writeFileSync(p,JSON.stringify(d,null,2));
 ' "$seed/profiles/web/package.json"
