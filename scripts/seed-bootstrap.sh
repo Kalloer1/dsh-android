@@ -244,8 +244,11 @@ inject_dsh_profiles(){
     [[ -n "$patch_tgz" ]] || { log "错误：补丁层插件 npm pack 失败"; exit 1; }
     ( cd "$seed/profiles/web" && npm install --no-bin-links --no-audit --no-fund --omit=optional \
         --registry="${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" \
-        "@deepseek-ai/dsh-base@${DSH_VER}" "@deepseek-ai/dsh-web-app@${DSH_VER}" \
         "$PLUGIN_FREE_MODEL" "$PLUGIN_MOBILE_UI" "$REPO_ROOT/plugins/dsh-android-patch/$patch_tgz" )
+    # 注意：不装 @deepseek-ai/dsh-base / dsh-web-app——PC 实测 profiles 树只有 4.7MB：
+    # 核心 bundle 由 dsh 首启从全局 lib/node_modules 自动投影（.dsh-module-fallback）。
+    # 全量 npm install 核心树曾把 seed zip 撑到 307MB，触发 TermuxInstaller
+    # NewByteArray OOM（JNI java_array==null SIGABRT）——勿回退。
     # profile 根文件（对齐 dsh 自动生成版的注释壳）
     cat > "$seed/profiles/web/cordis.yml" <<'EOF'
 # dsh profile root — the tree is composed as patches: each bundle in
