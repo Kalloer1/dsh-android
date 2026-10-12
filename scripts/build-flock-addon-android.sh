@@ -25,7 +25,8 @@ if [[ ! -s "$WORK/node-headers.tar.gz" ]]; then
         "https://nodejs.org/dist/v$NODE_VER/node-v$NODE_VER-headers.tar.gz"
 fi
 tar xzf "$WORK/node-headers.tar.gz" -C "$WORK"
-INC="$WORK/node-v$NODE_VER/include"
+INC="$WORK/node-v$NODE_VER/include/node"
+[[ -f "$INC/node_api.h" ]] || { log "错误：headers 解包后找不到 $INC/node_api.h"; exit 1; }
 
 SRC="$WORK/flock-src"
 rm -rf "$SRC"; mkdir -p "$SRC"
@@ -36,7 +37,7 @@ cp "$ADDON_PKG/src/flock.c" "$SRC/"
 
 log "NDK clang 交叉编译 android-$ARCH system.node (API $API)"
 "$TOOLCHAIN/clang" --target="$ARCH-linux-android$API" -shared -fPIC -O2 \
-    -DNAPI_VERSION=8 -I"$INC/node_api.h" -I"$INC" \
+    -DNAPI_VERSION=8 -I"$INC" \
     -o "$WORK/system.node" "$SRC/flock.c"
 file "$WORK/system.node"
 
