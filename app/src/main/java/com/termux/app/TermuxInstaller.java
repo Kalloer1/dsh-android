@@ -156,8 +156,10 @@ final class TermuxInstaller {
                     final byte[] buffer = new byte[8096];
                     final List<Pair<String, String>> symlinks = new ArrayList<>(50);
 
-                    final byte[] zipBytes = loadZipBytes();
-                    try (ZipInputStream zipInput = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+                    // dsh-android: 零拷贝流式读取内嵌 bootstrap（旧实现整包 NewByteArray，
+                    // 打种后 >200MB 时小堆设备直接 JNI abort）
+                    System.loadLibrary("termux-bootstrap");
+                    try (ZipInputStream zipInput = new ZipInputStream(new BlobInputStream())) {
                         ZipEntry zipEntry;
                         while ((zipEntry = zipInput.getNextEntry()) != null) {
                             if (zipEntry.getName().equals("SYMLINKS.txt")) {
@@ -382,5 +384,40 @@ final class TermuxInstaller {
     }
 
     public static native byte[] getZip();
+
+    /* dsh-android: streaming accessors into the embedded bootstrap blob. */
+    public static native int getZipSize();
+    public static native int copyBytes(long off, byte[] dst, int doff, int count);
+
+    private static final class BlobInputStream extends java.io.InputStream {
+        private long pos;
+        private int remaining;
+        private boolean sizeKnown;
+        private final byte[] one = new byte[1];
+
+        @Override
+        public int read() throws java.io.IOException {
+            return read(one, 0, 1) == -1 ? -1 : one[0] & 0xff;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws java.io.IOException {
+            if (!sizeKnown) { remaining = getZipSize(); sizeKnown = true; }
+            if (remaining <= 0) return -1;
+            if (len > remaining) len = remaining;
+            int n = copyBytes(pos, b, off, len);
+            if (n < 0) throw new java.io.IOException("copyBytes failed at " + pos);
+            if (n == 0) return -1;
+            pos += n;
+            remaining -= n;
+            return n;
+        }
+
+        @Override
+        public int available() {
+            if (!sizeKnown) { remaining = getZipSize(); sizeKnown = true; }
+            return remaining;
+        }
+    }
 
 }
