@@ -217,10 +217,14 @@ inject_dsh_profiles(){
     mkdir -p "$seed/profiles/web"
 
     log "以 --no-bin-links 预装 web profile（扁平 node_modules、零 symlink）"
+    local patch_tgz
+    ( cd "$REPO_ROOT/plugins/dsh-android-patch" && npm pack >/dev/null 2>&1 )
+    patch_tgz=$(cd "$REPO_ROOT/plugins/dsh-android-patch" && ls dsh-android-patch-*.tgz | head -1)
+    [[ -n "$patch_tgz" ]] || { log "错误：补丁层插件 npm pack 失败"; exit 1; }
     ( cd "$seed/profiles/web" && npm install --no-bin-links --no-audit --no-fund --omit=optional \
         --registry="${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" \
         "@deepseek-ai/dsh-base@${DSH_VER}" "@deepseek-ai/dsh-web-app@${DSH_VER}" \
-        "$PLUGIN_FREE_MODEL" "$PLUGIN_MOBILE_UI" )
+        "$PLUGIN_FREE_MODEL" "$PLUGIN_MOBILE_UI" "$REPO_ROOT/plugins/dsh-android-patch/$patch_tgz" )
     # profile 根文件（对齐 dsh 自动生成版的注释壳）
     cat > "$seed/profiles/web/cordis.yml" <<'EOF'
 # dsh profile root — the tree is composed as patches: each bundle in
@@ -235,7 +239,7 @@ d.name="dsh-profile-web"; d.private=true; d.version=d.version||"1.0.0";
 d.dependencies=d.dependencies||{};
 const prof=(d.dsh&&d.dsh.profile)||{};
 d.dsh={...(d.dsh||{}),profile:{...prof,bundles:[
-  "@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","dsh-our-free-model","dsh-web-mobile"]}};
+  "@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","dsh-our-free-model","dsh-web-mobile","dsh-android-patch"]}};
 fs.writeFileSync(p,JSON.stringify(d,null,2));
 ' "$seed/profiles/web/package.json"
     # 内置插件必设 managed，禁插件自升级与 APK 受管更新打架（§3.3）

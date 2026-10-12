@@ -1,0 +1,4 @@
+# dsh-android-patch bundle patch: one client-only row (host half is empty apply).
+- insert:
+    - id: dsh-android-patch
+      name: 'dsh-android-patch'

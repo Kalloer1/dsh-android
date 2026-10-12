@@ -1,0 +1,29 @@
+{
+  "name": "dsh-android-patch",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "description": "dsh-android APK 补丁层：修 WebView/软键盘/安全区等 Android 特有问题（依赖 dsh-web-mobile 打底）",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh-plugin": {
+    "manifestVersion": "0.15",
+    "id": "dev.kalloer1.dsh-android-patch",
+    "apiVersion": "v1alpha1"
+  }
+}

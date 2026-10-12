@@ -29,9 +29,9 @@ INC="$WORK/node-v$NODE_VER/include"
 
 SRC="$WORK/flock-src"
 rm -rf "$SRC"; mkdir -p "$SRC"
-# 源文件取自 stage 已安装的 addon 主包（打种 e 步产物）
-ADDON_PKG="$STAGE/lib/node_modules/@deepseek-ai/node-addon-system"
-[[ -d "$ADDON_PKG/src" ]] || { log "错误：stage 里没有 addon 源（检查 DSH 注入步）"; exit 1; }
+# addon 包在 npm 树里的位置不固定（常嵌在 @deepseek-ai/dsh/node_modules 下），find 定位
+ADDON_PKG="$(find "$STAGE" -type d -path "*/@deepseek-ai/node-addon-system" 2>/dev/null | head -1)"
+[[ -n "$ADDON_PKG" && -d "$ADDON_PKG/src" ]] || { log "错误：stage 里找不到带 src 的 addon 包（检查 DSH 注入步）"; exit 1; }
 cp "$ADDON_PKG/src/flock.c" "$SRC/"
 
 log "NDK clang 交叉编译 android-$ARCH system.node (API $API)"
