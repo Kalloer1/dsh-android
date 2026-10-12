@@ -1,5 +1,12 @@
 # dsh-android release 签名 keystore 一次性配置指南
 
+> **状态（2026-10-12）：已配置完成。** 四个 repository secrets 均已写入
+> `Kalloer1/dsh-android`；keystore 为 openssl 生成的 PKCS12（别名 `dsh-android`，
+> 自签 RSA2048，有效期至 2056-10-04），本地备份在仓库主机器
+> `D:\dsh-android\secrets\dsh-release.p12 + dsh-release.password`。
+> **务必备离机副本**——p12 或密码丢失后，已发布版本将无法被同 key 升级覆盖。
+> 以下为原始指南（换 key 时用）。
+
 CI（`.github/workflows/dsh-android-build.yml`）构建 release APK 时会检查下面四个
 repository secrets；齐全就用正式 key 签名，缺失则降级用仓库自带的
 `app/testkey_untrusted.jks`（与 debug 构建同款、上游标记 untrusted 的测试 key）

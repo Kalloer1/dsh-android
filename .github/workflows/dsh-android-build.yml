@@ -121,6 +121,7 @@ jobs:
         shell: bash {0}
         run: |
           set -e
+          export ANDROID_NDK_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/29.0.14206865"
           if [ -f scripts/seed-bootstrap.sh ]; then
             echo "Found scripts/seed-bootstrap.sh, running it"
             bash scripts/seed-bootstrap.sh

@@ -252,6 +252,22 @@ fs.writeFileSync(p,JSON.stringify(d,null,2));
     du -sh "$WORK/stage/share/dsh-seed"
 }
 
+# ---- e3. Android 持久层补丁（flock loader + link(2) 降级，幂等 python 脚本）----
+patch_android(){
+    command -v python3 >/dev/null || { log "错误：CI 缺少 python3"; exit 1; }
+    python3 "$REPO_ROOT/scripts/patch-android-persistence.py" "$WORK"
+    # 幂等重跑一遍证明可重复
+    python3 "$REPO_ROOT/scripts/patch-android-persistence.py" "$WORK" | grep -q "skip" || true
+}
+
+# ---- e4. 交叉编译 bionic flock addon（NDK 在场才跑；产物随 e3 的 loader 补丁生效）----
+build_flock_addon(){
+    local node_ver
+    node_ver=$(sed -n 's|.*nodejs/nodejs_\([0-9.]*\)-[0-9]*_aarch64.deb.*|\1|p' "$WORK/closure.tsv" | head -1)
+    STAGE="$WORK/stage" WORK="$WORK/flockbuild" NODE_VER="${node_ver:-${NODE_VER:-26.4.0}}" \
+        bash "$REPO_ROOT/scripts/build-flock-addon-android.sh"
+}
+
 # ---- f. 重新打包回 build.gradle 期望的文件名，放回 cpp/ ----
 repack(){
     local out="$WORK/bootstrap-${ARCH}.seeded.zip"
@@ -278,6 +294,12 @@ main(){
     run_step "d. 注入 TUNA apt 源"            inject_sources_list
     run_step "e. 注入 dsh CLI"                inject_dsh
     run_step "e2. dsh home 打种(profile+插件)" inject_dsh_profiles
+    run_step "e3. Android 持久层补丁"          patch_android
+    if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+        run_step "e4. 编译 bionic flock addon" build_flock_addon
+    else
+        log "e4 跳过：无 ANDROID_NDK_HOME（本机模式，loader 将走 no-op 锁兜底）"
+    fi
     run_step "f. 重新打包并放回 cpp/"          repack
     log "全部完成，总用时 $(( SECONDS - t0 ))s"
     log "构建：./gradlew assembleRelease -PdshSeededBootstrap（跳过下载与校验，直接用打种 zip）"
