@@ -15,8 +15,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${WORK:-$REPO_ROOT/build/flock-$ARCH}"
 API="${API:-24}"
 
-TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-[[ -x "$TOOLCHAIN/clang" ]] || { log "错误：找不到 NDK clang（ANDROID_NDK_HOME）"; exit 1; }
+TOOLCHAIN="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin 2>/dev/null | head -1)"
+[[ -n "$TOOLCHAIN" && -x "$TOOLCHAIN/clang" || -f "$TOOLCHAIN/clang.exe" ]] || { log "错误：找不到 NDK clang（ANDROID_NDK_HOME）"; exit 1; }
+CLANG="$TOOLCHAIN/clang"
+[[ -x "$CLANG" ]] || CLANG="$TOOLCHAIN/clang.exe"
 
 mkdir -p "$WORK"
 if [[ ! -s "$WORK/node-headers.tar.gz" ]]; then
@@ -36,7 +38,7 @@ ADDON_PKG="$(find "$STAGE" -type d -path "*/@deepseek-ai/node-addon-system" 2>/d
 cp "$ADDON_PKG/src/flock.c" "$SRC/"
 
 log "NDK clang 交叉编译 android-$ARCH system.node (API $API)"
-"$TOOLCHAIN/clang" --target="$ARCH-linux-android$API" -shared -fPIC -O2 \
+"$CLANG" --target="$ARCH-linux-android$API" -shared -fPIC -O2 \
     -DNAPI_VERSION=8 -I"$INC" \
     -o "$WORK/system.node" "$SRC/flock.c"
 file "$WORK/system.node"

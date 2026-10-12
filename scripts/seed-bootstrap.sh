@@ -120,7 +120,25 @@ resolve_closure(){
     column -t "$WORK/closure.tsv" || cat "$WORK/closure.tsv"
 }
 
-# ---- c. 逐个下载 .deb 并 --extract 合并进 stage（重复覆盖官方基础包无害）----
+# ---- deb 解包器：优先 dpkg-deb（Linux/CI），否则 Windows bsdtar 两步法 ----
+BSDTAR="${BSDTAR:-/c/Windows/System32/tar.exe}"
+extract_deb(){
+    local deb="$1" dest="$2"
+    if command -v dpkg-deb >/dev/null 2>&1; then
+        dpkg-deb --extract "$deb" "$dest"
+    else
+        [[ -x "$BSDTAR" ]] || { log "错误：无 dpkg-deb 也无 bsdtar（$BSDTAR）"; return 1; }
+        local tmp="$dest._ar"; rm -rf "$tmp"; mkdir -p "$tmp"
+        "$BSDTAR" -xf "$deb" -C "$tmp" || return 1
+        local data
+        data=$(ls "$tmp"/data.tar.* | head -1)
+        mkdir -p "$dest"
+        "$BSDTAR" -xf "$data" -C "$dest" || return 1
+        rm -rf "$tmp"
+    fi
+}
+
+# ---- c. 逐个下载 .deb 并解包合并进 stage（重复覆盖官方基础包无害）----
 # 注意：Termux deb 的 data.tar 路径是 data/data/com.termux/files/usr/...，
 # 而 bootstrap zip（=stage）布局是 prefix 相对（bin/ lib/ etc/），必须剥壳再合并，
 # 否则文件全落进 stage/data/... 的死层级里（node 找不到）。
@@ -135,7 +153,7 @@ download_debs_extract(){
         log "[$i/$total] 解包 $name"
         tmp="$WORK/debroot/$i"
         rm -rf "$tmp"; mkdir -p "$tmp"
-        dpkg-deb --extract "$out" "$tmp"
+        extract_deb "$out" "$tmp" || { log "错误：解包失败 $out"; exit 1; }
         # Termux deb 的 data.tar 路径实测为 usr/bin/node（前缀多一层 usr/，home/ 在
         # prefix 外忽略）；个别打包形态可能直接是 data/data/com.termux/files/usr/...
         # 或已经 prefix 相对。三种布局逐一识别后统一剥到 stage 根。
@@ -299,7 +317,12 @@ repack(){
     # 打种新增的软链（deb/npm 带来）一律解引用存实体副本；官方 SYMLINKS.txt 原样保留
     # （TermInstaller 靠它重建基础软链，且缺它必抛异常）。
     # 实体软链数量应远小于解引用体积代价，若 bin/ 冲突由后写覆盖。
-    ( cd "$WORK/stage" && zip -q -X -r "$out" . )
+    if command -v zip >/dev/null 2>&1; then
+        ( cd "$WORK/stage" && zip -q -X -r "$out" . )
+    else
+        # Windows 兜底：bsdtar 自动按 .zip 后缀打包（条目带 ./ 前缀，Java File 可正常解析）
+        ( cd "$WORK/stage" && "$BSDTAR" -acf "$(cygpath -w "$out" 2>/dev/null || echo "$out")" . )
+    fi
     ls -lh "$out"
     cp -f "$out" "$REPO_ROOT/app/src/main/cpp/bootstrap-${ARCH}.zip"
     log "已覆盖：$REPO_ROOT/app/src/main/cpp/bootstrap-${ARCH}.zip"
