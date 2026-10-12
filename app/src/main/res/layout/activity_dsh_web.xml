@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- dsh web 主界面：顶部简易工具条 + 全屏 WebView + 内置重试页覆盖层 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/activity_dsh_web_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <!-- 顶部简易工具条（TODO(设计): 配色与图标待 UI 定稿，当前先用深色纯色占位） -->
+    <LinearLayout
+        android:id="@+id/dsh_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#263238"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="8dp"
+        android:paddingTop="2dp"
+        android:paddingRight="4dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:id="@+id/dsh_toolbar_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingLeft="4dp"
+            android:text="@string/dsh_toolbar_title"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <!-- 电源/重启服务按钮 -->
+        <Button
+            android:id="@+id/dsh_toolbar_restart_button"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:text="@string/dsh_toolbar_restart"
+            android:textColor="#FFFFFF" />
+
+        <!-- 终端抽屉入口按钮 -->
+        <Button
+            android:id="@+id/dsh_toolbar_terminal_button"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:text="@string/dsh_toolbar_terminal"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/dsh_web_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- 加载失败时的内置重试页（dsh web 服务未就绪/崩溃中） -->
+        <LinearLayout
+            android:id="@+id/dsh_web_error_layout"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#1B2430"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="32dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/dsh_error_title"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/dsh_web_error_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:text="@string/dsh_error_text_connect"
+                android:textColor="#B0BEC5"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/dsh_web_retry_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="@string/dsh_retry" />
+        </LinearLayout>
+    </FrameLayout>
+
+</LinearLayout>

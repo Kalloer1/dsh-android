@@ -115,18 +115,31 @@ resolve_closure(){
 }
 
 # ---- c. 逐个下载 .deb 并 --extract 合并进 stage（重复覆盖官方基础包无害）----
+# 注意：Termux deb 的 data.tar 路径是 data/data/com.termux/files/usr/...，
+# 而 bootstrap zip（=stage）布局是 prefix 相对（bin/ lib/ etc/），必须剥壳再合并，
+# 否则文件全落进 stage/data/... 的死层级里（node 找不到）。
 download_debs_extract(){
     mkdir -p "$WORK/debs"
-    local total=$(grep -c '^PKG' "$WORK/closure.tsv") i=0 name path out
+    local total=$(grep -c '^PKG' "$WORK/closure.tsv") i=0 name path out tmp
     while IFS=$'\t' read -r tag name path; do
         [[ "$tag" == "PKG" ]] || continue
         i=$((i+1))
         out="$WORK/debs/$(basename "$path")"
         [[ -s "$out" ]] || { log "[$i/$total] 下载 $path"; curl -fL --retry 3 -o "$out" "$APT_BASE/$path"; }
         log "[$i/$total] 解包 $name"
-        dpkg-deb --extract "$out" "$WORK/stage"
+        tmp="$WORK/debroot/$i"
+        rm -rf "$tmp"; mkdir -p "$tmp"
+        dpkg-deb --extract "$out" "$tmp"
+        if [[ -d "$tmp/data/data/com.termux/files" ]]; then
+            cp -a "$tmp/data/data/com.termux/files/." "$WORK/stage/"
+        else
+            cp -a "$tmp/." "$WORK/stage/"
+        fi
+        rm -rf "$tmp"
     done < "$WORK/closure.tsv"
     du -sh "$WORK/stage"
+    [[ -x "$WORK/stage/bin/node" || -f "$WORK/stage/bin/node" ]] \
+        || { log "错误：合并后 stage/bin/node 不存在，剥壳逻辑失效"; exit 1; }
 }
 
 # ---- d. 覆写 apt 源为 TUNA，官方源以注释形式备份 ----
@@ -146,12 +159,27 @@ EOF
 }
 
 # ---- e. dsh 注入：CI 有网，直接 npm 全局式安装到 stage（产物进 zip 后用户离线可用）----
+# 构建源与运行时分家：npmmirror 对 @deepseek-ai/dsh 的新传递依赖（@aws-sdk/*）同步滞后
+# 会 E404，构建默认官方 registry（CI 在美西，快），失败兜底 npmmirror；
+# npmmirror 只烤进用户运行时 $PREFIX/etc/npmrc。
 inject_dsh(){
     command -v npm >/dev/null || { log "错误：CI 缺少 npm"; exit 1; }
-    npm install --prefix "$WORK/stage" --no-audit --no-fund \
-        --registry="$NPM_REGISTRY" "$DSH_PKG"
+    local ok=0 reg
+    for reg in "${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" "$NPM_REGISTRY"; do
+        log "尝试从 $reg 安装 $DSH_PKG"
+        if npm install --prefix "$WORK/stage" --no-audit --no-fund --registry="$reg" "$DSH_PKG"; then
+            ok=1; break
+        fi
+        log "源 $reg 失败，清理后换源重试"
+        rm -rf "$WORK/stage/lib/node_modules" "$WORK/stage/node_modules" "$WORK/stage/package.json" "$WORK/stage/package-lock.json"
+    done
+    [[ $ok -eq 1 ]] || { log "错误：所有 registry 均安装失败"; exit 1; }
+    # 用户运行时镜像（设备端 npm 补装用）
+    mkdir -p "$WORK/stage/etc"
+    printf 'registry=%s\n' "$NPM_REGISTRY" > "$WORK/stage/etc/npmrc"
     # npm 会在 stage/lib/node_modules/@deepseek-ai/dsh 落全量依赖树；
-    # stage/bin/dsh 是软链，Android 端解压器对软链支持不稳，改为固定启动壳。
+    # stage/bin/dsh 是软链，Android 端解压器（Java ZipInputStream）不处理 symlink 条目，
+    # 改为实体启动壳。
     rm -f "$WORK/stage/bin/dsh"
     cat > "$WORK/stage/bin/dsh" <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash -e
@@ -170,8 +198,12 @@ EOF
 repack(){
     local out="$WORK/bootstrap-${ARCH}.seeded.zip"
     rm -f "$out"
-    # -y 保留符号链接条目；zip 存 unix 权限位，Android 端解压器按此恢复
-    ( cd "$WORK/stage" && zip -q -X -r -y "$out" . )
+    # TermInstaller 用 Java ZipInputStream 解流：不认 symlink 条目（会把链接目标字符串
+    # 当文件内容写出去，成品是坏文件），官方 zip 因此把软链全记在 SYMLINKS.txt。
+    # 打种新增的软链（deb/npm 带来）一律解引用存实体副本；官方 SYMLINKS.txt 原样保留
+    # （TermInstaller 靠它重建基础软链，且缺它必抛异常）。
+    # 实体软链数量应远小于解引用体积代价，若 bin/ 冲突由后写覆盖。
+    ( cd "$WORK/stage" && zip -q -X -r "$out" . )
     ls -lh "$out"
     cp -f "$out" "$REPO_ROOT/app/src/main/cpp/bootstrap-${ARCH}.zip"
     log "已覆盖：$REPO_ROOT/app/src/main/cpp/bootstrap-${ARCH}.zip"

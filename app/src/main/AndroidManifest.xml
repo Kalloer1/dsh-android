@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.READ_LOGS" />
@@ -49,14 +51,16 @@
         android:theme="@style/Theme.TermuxApp.DayNight.DarkActionBar"
         tools:targetApi="m">
 
+        <!-- dsh 定制层：App 主入口，全屏 WebView 直连 dsh web（http://127.0.0.1:3080）。
+             图标暂复用现有 launcher（待设计）。 -->
         <activity
-            android:name=".app.TermuxActivity"
+            android:name=".app.dsh.DshWebActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|density|screenLayout|keyboard|keyboardHidden|navigation"
-            android:label="@string/application_name"
+            android:label="@string/dsh_activity_label"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
-            android:theme="@style/Theme.TermuxActivity.DayNight.NoActionBar"
+            android:theme="@style/Theme.TermuxApp.DayNight.NoActionBar"
             tools:targetApi="n">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -69,10 +73,22 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
 
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts" />
+            <!-- TODO(dsh): 原 android.app.shortcuts meta-data 未迁到本入口：
+                 res/xml/shortcuts.xml 的 intent 指向 TermuxActivity(ACTION_RUN)，
+                 而 TermuxActivity 已改为 exported=false 内部入口，launcher 无法直接触发
+                 非导出 Activity。若需保留长按快捷入口，请修改 shortcuts.xml 指向
+                 com.termux.app.dsh.DshWebActivity 后再挂回本 meta-data。 -->
         </activity>
+
+        <activity
+            android:name=".app.TermuxActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|density|screenLayout|keyboard|keyboardHidden|navigation"
+            android:label="@string/application_name"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.TermuxActivity.DayNight.NoActionBar"
+            tools:targetApi="n" />
 
         <activity-alias
             android:name=".HomeActivity"
@@ -195,6 +211,21 @@
 
         <service
             android:name=".app.TermuxService"
+            android:exported="false" />
+
+        <!-- dsh 定制层：保活 `dsh web`（127.0.0.1:3080）的前台服务 -->
+        <service
+            android:name=".app.dsh.DshWebService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keep the bundled dsh web server (localhost:3080) alive as the app's primary UI backend" />
+        </service>
+
+        <!-- dsh 定制层：前台通知点击回 DshWebActivity（仅显式 PendingIntent 触发） -->
+        <receiver
+            android:name=".app.dsh.DshNotificationReceiver"
             android:exported="false" />
 
         <service

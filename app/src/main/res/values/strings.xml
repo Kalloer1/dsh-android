@@ -235,4 +235,25 @@
     <!-- Donate Preference -->
     <string name="donate_preference_title">Donate</string>
 
+    <!-- ========== dsh 定制层（DshWebActivity / DshWebService） ========== -->
+    <string name="dsh_activity_label">dsh</string>
+    <string name="dsh_toolbar_title">dsh</string>
+    <string name="dsh_toolbar_terminal">终端</string>
+    <string name="dsh_toolbar_restart">重启服务</string>
+    <string name="dsh_menu_terminal">打开终端</string>
+    <string name="dsh_menu_restart_service">重启 dsh web 服务</string>
+    <string name="dsh_error_title">无法连接 dsh web</string>
+    <string name="dsh_error_text_connect">本地服务尚未就绪或已崩溃，正在自动重启，请稍后重试。</string>
+    <string name="dsh_error_text_bootstrap">首次启动正在解压引导文件系统，请稍候…</string>
+    <string name="dsh_error_text_bootstrap_failed">引导安装入口不可用，请从右上角菜单进入终端手动完成初始化。</string>
+    <string name="dsh_retry">重试</string>
+    <string name="dsh_error_no_browser">未找到可打开链接的系统浏览器</string>
+    <string name="dsh_toast_restarting_service">正在重启 dsh web 服务…</string>
+    <string name="dsh_notification_text_running">dsh web 服务运行中</string>
+    <string name="dsh_notification_text_restarting">dsh web 服务异常，正在自动重启…</string>
+    <string name="dsh_notification_action_stop">停止</string>
+    <string name="dsh_battery_dialog_title">允许 dsh 后台常驻</string>
+    <string name="dsh_battery_dialog_message">为避免系统休眠后 dsh web 服务被冻结，请在接下来的系统弹窗中选择"忽略优化"。拒绝后不会再次询问，可稍后在系统设置中手动允许。</string>
+    <string name="dsh_battery_dialog_go">去设置</string>
+
 </resources>
