@@ -355,6 +355,22 @@ copy_dsh_tree(){
     cp -a "$src/share/dsh-seed" "$dst/share/dsh-seed"
 }
 
+# ---- e5. 注入 require_builtin.node（dsh host boot 必需的原生 addon，napi-v9）----
+inject_require_builtin(){
+    local rbroot="${RB_OUT_ROOT:-$REPO_ROOT/../out}"
+    local pa
+    case "$ARCH" in aarch64) pa=android-arm64;; x86_64) pa=android-x64;; *) pa=android-arm64;; esac
+    if [[ ! -f "$rbroot/$pa/require_builtin.node" ]]; then
+        if [[ -n "${ANDROID_NDK_HOME:-}" && -d "${RB_SRC_ROOT:-$rbroot/../dsh-node-addon-require-builtin}" ]]; then
+            log "e5: 产物缺失，先交叉编译 $pa"
+            bash "$REPO_ROOT/scripts/build-require-builtin-android.sh" "$ARCH" || { log "e5: 编译失败，跳过注入（dsh 将无法启动）"; return 0; }
+        else
+            log "e5: 无产物且无源码/NDK，跳过（dsh 将无法启动）"; return 0
+        fi
+    fi
+    bash "$REPO_ROOT/scripts/inject-require-builtin.sh" "$WORK" "$rbroot"
+}
+
 # ---- f. 重新打包回 build.gradle 期望的文件名，放回 cpp/ ----
 repack(){
     local out="$WORK/bootstrap-${ARCH}.seeded.zip"
@@ -401,6 +417,7 @@ main(){
             log "e4 跳过：无 ANDROID_NDK_HOME（本机模式，loader 将走 no-op 锁兜底）"
         fi
         run_step "e3. Android 持久层补丁 ($ARCH)" patch_android
+        run_step "e5. 注入 require_builtin.node ($ARCH)" inject_require_builtin
         run_step "f. 重新打包并放回 cpp/ ($ARCH)" repack
     done
     log "全部完成，总用时 $(( SECONDS - t0 ))s"

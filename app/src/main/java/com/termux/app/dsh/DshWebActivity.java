@@ -58,7 +58,7 @@ public class DshWebActivity extends AppCompatActivity {
     private static final String LOG_TAG = "DshWebActivity";
 
     /** dsh web 地址：必须带本轮启动 token（见 {@link DshWebService#getAuthTokenUrl()}）。 */
-    private static final int TOKEN_POLL_MAX = 40;
+    private static final int TOKEN_POLL_MAX = 300;   // 5 分钟：冷启动含 260MB bootstrap 解包
     private int mTokenPollCount;
 
     private static final String PREFS_NAME = "dsh_web_prefs";
@@ -125,6 +125,7 @@ public class DshWebActivity extends AppCompatActivity {
 
     @SuppressLint("SetJavaScriptEnabled")
     private void setupWebView() {
+        WebView.setWebContentsDebuggingEnabled(true);
         mWebView.getSettings().setJavaScriptEnabled(true);
         // dsh web 前端可能使用 localStorage
         mWebView.getSettings().setDomStorageEnabled(true);
@@ -167,6 +168,8 @@ public class DshWebActivity extends AppCompatActivity {
             // 只处理主框架错误，页面里的子资源失败不打断使用
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && request.isForMainFrame()) {
                 mMainFrameFailed = true;
+                Logger.logError(LOG_TAG, "main-frame load error code=" + error.getErrorCode()
+                    + " desc=" + error.getDescription() + " url=" + request.getUrl());
                 showErrorView(getString(R.string.dsh_error_text_connect));
             }
         }
@@ -215,7 +218,30 @@ public class DshWebActivity extends AppCompatActivity {
         String url = DshWebService.getAuthTokenUrl();
         if (url != null) {
             mTokenPollCount = 0;
-            mWebView.loadUrl(url);
+            // 后台探测端口就绪再加载：冷启动/重启窗口里日志可能带着上一轮的旧 token，
+            // 直接 loadUrl 会吃到 ERR_CONNECTION_REFUSED
+            final String loadUrl = url;
+            new Thread(() -> {
+                boolean open;
+                try (java.net.Socket s = new java.net.Socket()) {
+                    s.connect(new java.net.InetSocketAddress("127.0.0.1", DshWebService.DSH_WEB_PORT), 500);
+                    open = true;
+                } catch (Exception e) {
+                    open = false;
+                }
+                final boolean ready = open;
+                mHandler.post(() -> {
+                    if (ready) {
+                        Logger.logInfo(LOG_TAG, "loading " + loadUrl.substring(0, loadUrl.indexOf("token=") + 11) + "...");
+                        mWebView.loadUrl(loadUrl);
+                    } else if (mTokenPollCount++ < TOKEN_POLL_MAX) {
+                        mHandler.postDelayed(this::loadDshUrl, 1000);
+                    } else {
+                        mTokenPollCount = 0;
+                        showErrorView(getString(R.string.dsh_error_text_connect));
+                    }
+                });
+            }).start();
             return;
         }
         if (mTokenPollCount++ < TOKEN_POLL_MAX) {

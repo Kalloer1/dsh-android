@@ -49,6 +49,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="false"
         android:theme="@style/Theme.TermuxApp.DayNight.DarkActionBar"
+        android:usesCleartextTraffic="true"
         tools:targetApi="m">
 
         <!-- dsh 定制层：App 主入口，全屏 WebView 直连 dsh web（http://127.0.0.1:3080）。

@@ -122,6 +122,9 @@ jobs:
         run: |
           set -e
           export ANDROID_NDK_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/29.0.14206865"
+          if [ ! -d ../dsh-node-addon-require-builtin ]; then
+            git clone --depth 1 https://github.com/deepseek-ai/dsh-node-addon-require-builtin ../dsh-node-addon-require-builtin
+          fi
           if [ -f scripts/seed-bootstrap.sh ]; then
             echo "Found scripts/seed-bootstrap.sh, running it"
             bash scripts/seed-bootstrap.sh
