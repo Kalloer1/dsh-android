@@ -1,5 +1,8 @@
 window.__ModuleLoader__.load({ id: "dsh-android-patch", factory: (require) => {
 "use strict";
+// __ModuleLoader__ 的 factory 只注入 require；CJS 半边需自建 module/exports 再 return
+var module = { exports: {} };
+var exports = module.exports;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.apply = apply;
 
