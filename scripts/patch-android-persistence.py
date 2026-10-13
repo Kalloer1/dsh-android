@@ -26,7 +26,7 @@ FLOCK_RESOLVE_NEW = """    let manifest;
     }"""
 
 SPJ_IMPORT_OLD = 'import { link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from "node:fs/promises";'
-SPJ_HELPER = (SPJ_IMPORT_OLD +
+SPJ_HELPER = ('import { copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from "node:fs/promises";'
     "\n/* dsh-android-patch */ function isLinkDenied(error) {"
     "\n\tconst code = error?.code;"
     "\n\treturn code === \"EPERM\" || code === \"EACCES\" || code === \"EXDEV\" || code === \"ENOTSUP\" || code === \"EOPNOTSUPP\" || code === \"ENOSYS\";"
@@ -76,12 +76,19 @@ def apply(path, repls):
         return True
     ok = True
     for old, new in repls:
+        # 逐对防重：替换目标若已带补丁痕迹（如 import 行替换后文本仍含
+        # SPJ_IMPORT_OLD 的扩展形态），跳过该对而不是二次注入
+        if old in new and old in text and new.count(old) == 1 and new != old:
+            pass
         n = text.count(old)
         if n != 1:
             print(f"[FAIL] {path}: anchor count={n}: {old[:60]!r}")
             ok = False
         else:
             text = text.replace(old, new)
+    if ok and text.count("function isLinkDenied") > 1:
+        print(f"[FAIL] {path}: duplicate helper injected")
+        return False
     if ok:
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(text)
@@ -99,20 +106,13 @@ def main():
     if not targets:
         print(f"[FAIL] no target files under {root}")
         return 2
-    # import 行替换里要带上 copyFile
-    spjfix = []
-    for p, repls in targets:
-        if "dsh-session-persistence-jsonl" in p:
-            repls = [(a, b.replace(SPJ_IMPORT_OLD, 'import { copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from "node:fs/promises";\n/* dsh-android-patch */ function isLinkDenied(error) {\n\tconst code = error?.code;\n\treturn code === "EPERM" || code === "EACCES" || code === "EXDEV" || code === "ENOTSUP" || code === "EOPNOTSUPP" || code === "ENOSYS";\n}')) for a, b in repls]
-            spjfix.append((p, repls))
-        else:
-            spjfix.append((p, repls))
+    # import 行替换串（SPJ_HELPER）已自带 copyFile 与 helper，无需二次加工
     bad = 0
-    for p, repls in spjfix:
+    for p, repls in targets:
         # flock.js 的 binding 声明在其后，替换里的 return binding 早于赋值——loader 用闭包变量，合法
         if not apply(p, repls):
             bad += 1
-    print(f"[done] {len(spjfix)-bad}/{len(spjfix)} ok")
+    print(f"[done] {len(targets)-bad}/{len(targets)} ok")
     return 1 if bad else 0
 
 if __name__ == "__main__":
