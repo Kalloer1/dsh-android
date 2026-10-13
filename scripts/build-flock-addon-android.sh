@@ -9,7 +9,11 @@ set -euo pipefail
 log(){ echo "[flock-android] $*"; }
 
 ARCH="${ARCH:-aarch64}"
-NODE_VER="${NODE_VER:-26.4.0}"                    # 与 bootstrap 里打种的 nodejs 版本一致
+# 编译头版本与设备 node 版本解耦：system.node 只用 Node-API（稳定 ABI），
+# 官方任意 >=14.x 的 headers 皆可编。Termux 的 nodejs 26.x 是自家编号，
+# nodejs.org 无对应 headers，直接取 LTS。
+HDR_VER="${HDR_VER:-22.15.0}"
+NODE_VER="$HDR_VER"
 STAGE="${STAGE:?需要 stage 目录（seed 脚本的工作树）}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${WORK:-$REPO_ROOT/build/flock-$ARCH}"
@@ -24,7 +28,7 @@ mkdir -p "$WORK"
 if [[ ! -s "$WORK/node-headers.tar.gz" ]]; then
     log "下载 node v$NODE_VER headers"
     curl -fsSL --retry 3 -o "$WORK/node-headers.tar.gz" \
-        "https://nodejs.org/dist/v$NODE_VER/node-v$NODE_VER-headers.tar.gz"
+        "${NODE_DIST_BASE:-https://nodejs.org/dist}/v$NODE_VER/node-v$NODE_VER-headers.tar.gz"
 fi
 tar xzf "$WORK/node-headers.tar.gz" -C "$WORK"
 INC="$WORK/node-v$NODE_VER/include/node"

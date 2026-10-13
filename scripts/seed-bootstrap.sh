@@ -86,9 +86,9 @@ END{
 fetch_bootstrap(){
     mkdir -p "$WORK"
     local enc="${BOOTSTRAP_VERSION//+/%2B}"
-    local url="https://github.com/termux/termux-packages/releases/download/bootstrap-${enc}/bootstrap-${ARCH}.zip"
+    local url="${BOOTSTRAP_BASE:-https://github.com/termux/termux-packages}/releases/download/bootstrap-${enc}/bootstrap-${ARCH}.zip"
     log "下载：$url"
-    curl -fL --retry 3 -o "$WORK/bootstrap-${ARCH}.zip.orig" "$url"
+    curl -fL -C - --retry 5 --retry-all-errors --connect-timeout 30 -o "$WORK/bootstrap-${ARCH}.zip.orig" "$url"
     ls -lh "$WORK/bootstrap-${ARCH}.zip.orig"
 }
 
@@ -120,21 +120,49 @@ resolve_closure(){
     column -t "$WORK/closure.tsv" || cat "$WORK/closure.tsv"
 }
 
-# ---- deb 解包器：优先 dpkg-deb（Linux/CI），否则 Windows bsdtar 两步法 ----
-BSDTAR="${BSDTAR:-/c/Windows/System32/tar.exe}"
+# ---- deb 解包器：优先 dpkg-deb（Linux/CI）；否则 ar 拆分(python) + tar 解 xz/gz ----
+# 注意别用 Windows bsdtar 直解 deb——它对 deb 内 xz 解压慢到不可用（单包 >3 分钟实测）。
+wpath(){ cygpath -w "$1" 2>/dev/null || echo "$1"; }   # Windows python 认不了 /d/ 路径
+PY="${PYTHON:-}"
+[[ -n "$PY" ]] || for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && PY="$c" && break; done
 extract_deb(){
     local deb="$1" dest="$2"
     if command -v dpkg-deb >/dev/null 2>&1; then
         dpkg-deb --extract "$deb" "$dest"
     else
-        [[ -x "$BSDTAR" ]] || { log "错误：无 dpkg-deb 也无 bsdtar（$BSDTAR）"; return 1; }
+        [[ -n "$PY" ]] || { log "错误：无 dpkg-deb 也无 python"; return 1; }
         local tmp="$dest._ar"; rm -rf "$tmp"; mkdir -p "$tmp"
-        "$BSDTAR" -xf "$deb" -C "$tmp" || return 1
+        # ar 容器拆出 data.tar.*（头格式：!\n<16字节名><12字节mtime><6 uid><6 gid><8 mode><10 size>`\n）
+        "$PY" - "$(wpath "$deb")" "$(wpath "$tmp")" <<'PYEOF'
+import sys,os,shutil
+deb,out=sys.argv[1],sys.argv[2]
+buf=open(deb,'rb').read()
+assert buf[:2]==b'!<' , "not an ar archive"
+off=8
+while off+60<=len(buf):
+    name=buf[off:off+16].decode('ascii','replace').strip().rstrip('/')
+    try: size=int(buf[off+48:off+58].decode().strip())
+    except ValueError: break
+    data=buf[off+60:off+60+size]
+    if name.startswith('data.tar'):
+        open(os.path.join(out,name),'wb').write(data)
+        break
+    off+=60+size+(size&1)
+PYEOF
         local data
-        data=$(ls "$tmp"/data.tar.* | head -1)
+        data=$(ls "$tmp"/data.tar.* 2>/dev/null | head -1)
+        [[ -n "$data" ]] || { log "错误：ar 里没找到 data.tar.*: $deb"; rm -rf "$tmp"; return 1; }
         mkdir -p "$dest"
-        "$BSDTAR" -xf "$data" -C "$dest" || return 1
-        rm -rf "$tmp"
+        # Windows 无符号链接特权：GNU tar 会对 doc 软链报 "Cannot create symlink"。
+        # 这些链接不影响运行（TermInstaller Java 解流本来也不处理 symlink），只容忍
+        # 纯 symlink 错误；其它错误一律失败。doc 目录整体丢弃省体积。
+        local tarerr="$WORK/.tarerr"
+        if ! tar -xf "$data" -C "$dest" --exclude='*/doc/*' 2>"$tarerr"; then
+            if grep -v "Cannot create symlink\|Exiting with failure status" "$tarerr" | grep -q .; then
+                log "错误：tar 解包 $deb 失败：$(head -3 "$tarerr")"; rm -rf "$tmp" "$tarerr"; return 1
+            fi
+        fi
+        rm -rf "$tmp" "$tarerr"
     fi
 }
 
@@ -148,7 +176,7 @@ download_debs_extract(){
     while IFS=$'\t' read -r tag name path; do
         [[ "$tag" == "PKG" ]] || continue
         i=$((i+1))
-        out="$WORK/debs/$(basename "$path")"
+        out="$WORK/debs/$(basename "$path" | tr ':' '_')"   # openssl_1:3.6.5 之类含冒号，Windows 落地名需净化
         [[ -s "$out" ]] || { log "[$i/$total] 下载 $path"; curl -fL --retry 3 -o "$out" "$APT_BASE/$path"; }
         log "[$i/$total] 解包 $name"
         tmp="$WORK/debroot/$i"
@@ -169,6 +197,11 @@ download_debs_extract(){
     du -sh "$WORK/stage"
     [[ -x "$WORK/stage/bin/node" || -f "$WORK/stage/bin/node" ]] \
         || { log "错误：合并后 stage/bin/node 不存在，剥壳逻辑失效"; exit 1; }
+    # Windows 解包没有 dpkg 的 SONAME 软链：libfoo.so.X.Y 实体补一个无版本 libfoo.so 副本
+    # （Linux 构建器上 dpkg-deb --extract 会自带 symlink，此步自动跳过）
+    if command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
+        "${PY:-python3}" "$REPO_ROOT/scripts/fix-soname-links.py" "$( [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && cygpath -w "$WORK/stage" || echo "$WORK/stage" )"
+    fi
 }
 
 # ---- d. 覆写 apt 源为 TUNA，官方源以注释形式备份 ----
@@ -205,6 +238,16 @@ inject_dsh(){
         rm -rf "$WORK/stage/lib/node_modules" "$WORK/stage/node_modules" "$WORK/stage/package.json" "$WORK/stage/package-lock.json"
     done
     [[ $ok -eq 1 ]] || { log "错误：所有 registry 均安装失败"; exit 1; }
+    # Windows 的 npm -g --prefix 布局是 <prefix>/node_modules（非 $PREFIX/lib/node_modules），
+    # 且会在 prefix 根写 *.cmd/ps1 shim。归位成 Termux 布局并清掉 Windows shim。
+    if [[ -d "$WORK/stage/node_modules" ]]; then
+        mkdir -p "$WORK/stage/lib"
+        rm -rf "$WORK/stage/lib/node_modules"
+        mv "$WORK/stage/node_modules" "$WORK/stage/lib/node_modules"
+        find "$WORK/stage" -maxdepth 1 \( -name "*.cmd" -o -name "*.ps1" \) -delete
+        find "$WORK/stage/bin" -maxdepth 1 \( -name "dsh" -o -name "dsh.cmd" -o -name "dsh.ps1" \) -delete 2>/dev/null || true
+        log "Windows npm 布局已归位到 lib/node_modules"
+    fi
     # 用户运行时镜像（设备端 npm 补装用）
     mkdir -p "$WORK/stage/etc"
     printf 'registry=%s\n' "$NPM_REGISTRY" > "$WORK/stage/etc/npmrc"
@@ -282,17 +325,18 @@ fs.writeFileSync(p,JSON.stringify(d,null,2));
 
 # ---- e3. Android 持久层补丁（flock loader + link(2) 降级，幂等 python 脚本）----
 patch_android(){
-    command -v python3 >/dev/null || { log "错误：CI 缺少 python3"; exit 1; }
-    python3 "$REPO_ROOT/scripts/patch-android-persistence.py" "$WORK"
-    # 幂等重跑一遍证明可重复
-    python3 "$REPO_ROOT/scripts/patch-android-persistence.py" "$WORK" | grep -q "skip" || true
+    local py="${PYTHON:-}"
+    [[ -n "$py" ]] || for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && py="$c" && break; done
+    [[ -n "$py" ]] || { log "错误：找不到 python"; exit 1; }
+    "$py" "$(wpath "$REPO_ROOT/scripts/patch-android-persistence.py")" "$(wpath "$WORK")"
+    "$py" "$(wpath "$REPO_ROOT/scripts/patch-android-persistence.py")" "$(wpath "$WORK")" | grep -q "skip" || true
 }
 
 # ---- e4. 交叉编译 bionic flock addon（NDK 在场才跑；产物随 e3 的 loader 补丁生效）----
 build_flock_addon(){
-    local node_ver
-    node_ver=$(sed -n "s|.*nodejs/nodejs_\([0-9.]*\)-[0-9a-z]*_${ARCH}.deb.*|\1|p" "$WORK/closure.tsv" | head -1)
-    STAGE="$WORK/stage" WORK="$WORK/flockbuild" NODE_VER="${node_ver:-${NODE_VER:-26.4.0}}" ARCH="$ARCH" \
+    # 不传 closure 的 node 版本：那是 Termux 自家编号（26.x），nodejs.org 无对应 headers；
+    # 编译头由 build-flock-addon-android.sh 自取官方 LTS（Node-API 稳定 ABI 与运行时版本解耦）
+    STAGE="$WORK/stage" WORK="$WORK/flockbuild" ARCH="$ARCH" \
         bash "$REPO_ROOT/scripts/build-flock-addon-android.sh"
 }
 
@@ -323,8 +367,9 @@ repack(){
     if command -v zip >/dev/null 2>&1; then
         ( cd "$WORK/stage" && zip -q -X -r "$out" . )
     else
-        # Windows 兜底：bsdtar 自动按 .zip 后缀打包（条目带 ./ 前缀，Java File 可正常解析）
-        ( cd "$WORK/stage" && "$BSDTAR" -acf "$(cygpath -w "$out" 2>/dev/null || echo "$out")" . )
+        # Windows：python 打包器（条目名精确、无 ./ 前缀；bsdtar 的 ./ 会破坏
+        # TermInstaller 对 SYMLINKS.txt 的精确匹配）
+        "${PY:-python}" "$REPO_ROOT/scripts/zipdir.py" "$( [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && cygpath -w "$WORK/stage" || echo "$WORK/stage" )" "$( [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && cygpath -w "$out" || echo "$out" )"
     fi
     ls -lh "$out"
     cp -f "$out" "$REPO_ROOT/app/src/main/cpp/bootstrap-${ARCH}.zip"

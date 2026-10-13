@@ -209,7 +209,14 @@ final class TermuxInstaller {
                     if (symlinks.isEmpty())
                         throw new RuntimeException("No SYMLINKS.txt encountered");
                     for (Pair<String, String> symlink : symlinks) {
-                        Os.symlink(symlink.first, symlink.second);
+                        try {
+                            Os.symlink(symlink.first, symlink.second);
+                        } catch (android.system.ErrnoException e) {
+                            // dsh-android: 打种的 SONAME 实体副本可能已占位链接名（EEXIST）。
+                            // 实体副本与软链语义等价，容忍跳过；其它错误照常上抛。
+                            if (e.errno != android.system.OsConstants.EEXIST) throw e;
+                            Logger.logDebug(LOG_TAG, "symlink skipped (exists as file): " + symlink.second);
+                        }
                     }
 
                     Logger.logInfo(LOG_TAG, "Moving termux prefix staging to prefix directory.");

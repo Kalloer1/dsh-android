@@ -187,6 +187,11 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
         while (checksum.length() < 64) { checksum = "0" + checksum }
         if (checksum == expectedChecksum) {
             return
+        } else if (project.hasProperty("dshSeededBootstrap")) {
+            // dsh-android 打种模式：zip 内容必然与官方校验和不符；且 Windows 无法写出
+            // 含冒号的 deb 名（openssl_1:3.6.5），重下重存会死循环。警告后直接复用本地文件。
+            logger.warn("dshSeededBootstrap: checksum mismatch for " + localUrl + " (seeded/renamed file), using as-is")
+            return
         } else {
             logger.quiet("Deleting old local file with wrong hash: " + localUrl + ": expected: " + expectedChecksum + ", actual: " + checksum)
             file.delete()
