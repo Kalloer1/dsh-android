@@ -289,8 +289,17 @@ inject_dsh_profiles(){
     patch_tgz=$(cd "$REPO_ROOT/plugins/dsh-android-patch" && ls dsh-android-patch-*.tgz | head -1)
     [[ -n "$patch_tgz" ]] || { log "错误：补丁层插件 npm pack 失败"; exit 1; }
     ( cd "$seed/profiles/web" && npm install --no-bin-links --no-audit --no-fund --omit=optional \
+        --legacy-peer-deps \
         --registry="${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" \
         "$PLUGIN_FREE_MODEL" "$PLUGIN_MOBILE_UI" "$REPO_ROOT/plugins/dsh-android-patch/$patch_tgz" )
+    # 硬闸：插件的 peerDependencies（@deepseek-ai/dsh-llm/dsh-commands/cordis…）绝不能被
+    # npm 复制进 profiles/web/node_modules——否则核心 bundle 会被"全局+profiles"各加载一份，
+    # dsh-system-prompt 的 deployment:persona-prefix 注册两次，新建会话直接失败
+    # （agent-preset/invalid: persona … already registered）。核心包运行期由全局 lib 投影满足。
+    if [[ -d "$seed/profiles/web/node_modules/@deepseek-ai" ]]; then
+        log "错误：profiles/web/node_modules/@deepseek-ai 混入了核心包（peer 泄漏），会致 persona-prefix 双注册"
+        ls "$seed/profiles/web/node_modules/@deepseek-ai"; exit 1
+    fi
     # 注意：不装 @deepseek-ai/dsh-base / dsh-web-app——PC 实测 profiles 树只有 4.7MB：
     # 核心 bundle 由 dsh 首启从全局 lib/node_modules 自动投影（.dsh-module-fallback）。
     # 全量 npm install 核心树曾把 seed zip 撑到 307MB，触发 TermuxInstaller
