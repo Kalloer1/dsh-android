@@ -20,6 +20,13 @@
 - 修复并入库：WebView window.open→系统浏览器（onCreateWindow）；patch 插件 cordis 入口形状（name+apply）与 client 工厂 module/exports；打种器 isLinkDenied 双注入；require_builtin 双树注入；流式 bootstrap 解包（JNI OOM 根因）
 - 正式 APK 全链本地构建：seed(363s)→gradle→apksigner→adb install 已通
 
+## 2026-10-13 品牌化 + persona 双注册修复
+- 应用名改 `DeepSeek Harness`（launcher label + application label）
+- 图标换成用户指定的蓝毛女仆小人（纯 Python 生成自适应图标：各 dpi foreground + 深蓝底 background + legacy 圆/方图）
+- 换一套全新自签密钥（dsh-release2.p12，别名 dsh-android，~2056 到期），CI secrets 同步更新；包名维持 com.termux（改包名需重编整套 termux 二进制，共存靠卸载官方 Termux）
+- 免费插件回到 dsh-our-free-model@2.1.0（OpenCode 1.4.4 上游已封），撤 vendor tarball；不写入任何外部 API key
+- 关键修复：seed 装插件时 npm 把 peerDependencies（dsh-llm/dsh-commands/cordis…）连同整棵核心树复制进 profiles/web/node_modules，致 dsh-system-prompt 双加载、新建会话报 `agent-preset/invalid: persona … deployment:persona-prefix already registered`。加 `--legacy-peer-deps` + "profiles 内不得有 @deepseek-ai 核心包"硬闸修复；全新 APK 实测建会话成功
+
 ## 待办（按优先级）
 1. 全新安装终验：卸载清数据→装 1.4.4 打种 APK→首启解包→弹窗→建会话→免费模型回答（验收脚本化）
 2. ~~ABI 拆分瘦身~~ 已改双 ABI 打种（aarch64+x86_64）；32 位 arm/i686 维持官方 bootstrap（无 dsh，超旧设备不在射程）
