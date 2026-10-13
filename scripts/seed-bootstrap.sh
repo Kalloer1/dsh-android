@@ -424,6 +424,13 @@ main(){
         run_step "f. 重新打包并放回 cpp/ ($ARCH)" repack
     done
     log "全部完成，总用时 $(( SECONDS - t0 ))s"
+    # 坑：termux-bootstrap.c 用 .incbin 内嵌 zip，ninja 不把它记为依赖，
+    # zip 变了也不会重编 libtermux-bootstrap.so（曾连出两个"同尺寸"假新 APK）。
+    # 打种后强制清掉 native 中间产物，逼 gradle 重新内嵌。
+    rm -rf "$REPO_ROOT/app/.cxx" \
+           "$REPO_ROOT/app/build/intermediates/merged_native_libs" \
+           "$REPO_ROOT/app/build/intermediates/stripped_native_libs"
+    log "已清 native 中间产物（强制重编内嵌 zip）"
     log "构建：./gradlew assembleRelease -PdshSeededBootstrap（跳过下载与校验，直接用打种 zip）"
 }
 
