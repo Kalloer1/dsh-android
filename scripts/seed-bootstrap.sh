@@ -34,10 +34,10 @@ TUNA_APT="${TUNA_APT:-https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-mai
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 DSH_PKG="${DSH_PKG:-@deepseek-ai/dsh@0.2.0-rc.2}"
 DSH_VER="${DSH_PKG##*@}"
-# 1.4.4：OpenCode Zen 免费通道，零登录零 Key（2.1.0 起改为 EAC+GitHub 登录闸门，
-# 与"普通用户点开即用"的产品定位冲突，故钉 1.4.4；真机验收 2026-10-13 通过）。
-# npm registry 上没有 1.4.4（作者只发 GitHub release），vendor tarball 进仓库保证可复现。
-PLUGIN_FREE_MODEL="${PLUGIN_FREE_MODEL:-$REPO_ROOT/plugins/vendor/dsh-our-free-model-1.4.4.tgz}"
+# 免费通道内置插件：dsh-our-free-model@2.1.0（EAC 网关，需终端用户 GitHub 登录一次解锁）。
+# 曾用 1.4.4（OpenCode Zen 零登录），但上游已封禁外部调用、PC 实测全挂，故回到 2.1.0。
+# 登录/选模型属终端用户与插件之间的事，不作为 APK 验收卡点。
+PLUGIN_FREE_MODEL="${PLUGIN_FREE_MODEL:-dsh-our-free-model@2.1.0}"
 PLUGIN_MOBILE_UI="${PLUGIN_MOBILE_UI:-dsh-web-mobile@3.0.6}"
 ROOT_DEBS="${ROOT_DEBS:-nodejs}"              # 打种根包（逗号分隔；Termux 的 nodejs 自带 npm）
 WORK="${WORK:-$REPO_ROOT/build/seed-$ARCH}"

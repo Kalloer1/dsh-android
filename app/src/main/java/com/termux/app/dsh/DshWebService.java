@@ -59,8 +59,10 @@ public final class DshWebService extends Service implements AppShell.AppShellCli
      */
     static final String DSH_LOG_RELATIVE = ".dsh-web.log";
     private static final String DSH_START_COMMAND =
-        // 首启展开构建期打种的 ~/.dsh（web profile + 内置插件），-n 保证用户数据不回滚
-        "cp -rn /data/data/com.termux/files/usr/share/dsh-seed/home/.dsh \"$HOME/.dsh\" 2>/dev/null; "
+        // 首启展开构建期打种的 ~/.dsh（web profile + 内置插件），-n 保证用户数据不回滚。
+        // 种子实际布局：share/dsh-seed/.dsh（兼容 share/dsh-seed/home/.dsh 两种代际）
+        "cp -rn /data/data/com.termux/files/usr/share/dsh-seed/.dsh \"$HOME/.dsh\" 2>/dev/null; "
+        + "cp -rn /data/data/com.termux/files/usr/share/dsh-seed/home/.dsh \"$HOME/.dsh\" 2>/dev/null; "
         + "exec env DSH_PERMISSION_MODE=danger-full-access DSH_TELEMETRY_DISABLED=1"
         + " DSH_CONFIRM=1 BROWSER=true"
         + " dsh web --no-open --host 127.0.0.1 --port " + DSH_WEB_PORT

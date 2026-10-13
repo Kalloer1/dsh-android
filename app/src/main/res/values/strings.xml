@@ -13,7 +13,7 @@
 
 <resources>
 
-    <string name="application_name">&TERMUX_APP_NAME;</string>
+    <string name="application_name">DeepSeek Harness</string>
     <string name="shared_user_label">&TERMUX_APP_NAME; user</string>
 
 
@@ -236,7 +236,7 @@
     <string name="donate_preference_title">Donate</string>
 
     <!-- ========== dsh 定制层（DshWebActivity / DshWebService） ========== -->
-    <string name="dsh_activity_label">dsh</string>
+    <string name="dsh_activity_label">DeepSeek Harness</string>
     <string name="dsh_toolbar_title">dsh</string>
     <string name="dsh_toolbar_terminal">终端</string>
     <string name="dsh_toolbar_restart">重启服务</string>
