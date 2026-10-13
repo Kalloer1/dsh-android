@@ -12,9 +12,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Message;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -130,7 +132,32 @@ public class DshWebActivity extends AppCompatActivity {
         // dsh web 前端可能使用 localStorage
         mWebView.getSettings().setDomStorageEnabled(true);
         mWebView.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
-        // TODO: OAuth 若走 window.open 弹窗需要 WebChromeClient.onCreateWindow 支持，本期未实现
+        // window.open / target=_blank（如免费通道 GitHub 登录）交给系统浏览器：
+        // 用一个一次性 popup WebView 接住 transport，它一收到 URL 就外开并销毁
+        mWebView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                final WebView popup = new WebView(view.getContext());
+                popup.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                        openPopupExternally(v, request.getUrl().toString());
+                        return true;
+                    }
+
+                    @Override
+                    @Deprecated
+                    public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                        openPopupExternally(v, url);
+                        return true;
+                    }
+                });
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(popup);
+                resultMsg.sendToTarget();
+                return true;
+            }
+        });
         mWebView.setWebViewClient(mWebViewClient);
         // 不在此处 loadUrl：首启可能还需先解压 bootstrap，统一由 startFlow() 触发加载
     }
@@ -211,6 +238,18 @@ public class DshWebActivity extends AppCompatActivity {
             Logger.logError(LOG_TAG, "No external browser found for: " + url);
             Toast.makeText(this, R.string.dsh_error_no_browser, Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** popup WebView 收到跳转：交给系统浏览器，然后把它拆掉（post 出去销毁，避免回调内自毁）。 */
+    private void openPopupExternally(WebView popup, String url) {
+        openInExternalBrowser(url);
+        mHandler.post(() -> {
+            try {
+                popup.destroy();
+            } catch (Exception e) {
+                Logger.logError(LOG_TAG, "popup destroy failed: " + e.getMessage());
+            }
+        });
     }
 
     private void loadDshUrl() {
