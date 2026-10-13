@@ -424,11 +424,11 @@ main(){
         run_step "f. 重新打包并放回 cpp/ ($ARCH)" repack
     done
     log "全部完成，总用时 $(( SECONDS - t0 ))s"
-    # 坑：termux-bootstrap.c 用 .incbin 内嵌 zip，ninja 不把它记为依赖，
-    # zip 变了也不会重编 libtermux-bootstrap.so（曾连出两个"同尺寸"假新 APK）。
-    # 且 gradle build cache 的键不含 zip，删产物也会被缓存秒还原。
-    # 双保险：touch .c 改变任务输入快照 + 清 native 中间产物。
-    touch "$REPO_ROOT/app/src/main/cpp/termux-bootstrap.c"
+    # 坑：zip 由 termux-bootstrap-zip.S 的 .incbin 内嵌（不是 .c！），ninja 不追踪该依赖，
+    # zip 变了也不会重编 libtermux-bootstrap.so；gradle build cache 的键同样不含 zip，
+    # 删产物也会被缓存秒还原（曾连出三个"同尺寸"假新 APK）。
+    # 双保险：touch .S 改变任务输入快照 + 清 native 中间产物。
+    touch "$REPO_ROOT/app/src/main/cpp/termux-bootstrap-zip.S"
     rm -rf "$REPO_ROOT/app/.cxx" \
            "$REPO_ROOT/app/build/intermediates/merged_native_libs" \
            "$REPO_ROOT/app/build/intermediates/stripped_native_libs"
