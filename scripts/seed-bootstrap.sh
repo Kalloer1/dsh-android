@@ -34,7 +34,9 @@ TUNA_APT="${TUNA_APT:-https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-mai
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 DSH_PKG="${DSH_PKG:-@deepseek-ai/dsh@0.2.0-rc.2}"
 DSH_VER="${DSH_PKG##*@}"
-PLUGIN_FREE_MODEL="${PLUGIN_FREE_MODEL:-dsh-our-free-model@2.1.0}"
+# 1.4.4：OpenCode Zen 免费通道，零登录零 Key（2.1.0 起改为 EAC+GitHub 登录闸门，
+# 与"普通用户点开即用"的产品定位冲突，故钉 1.4.4；真机验收 2026-10-13 通过）
+PLUGIN_FREE_MODEL="${PLUGIN_FREE_MODEL:-dsh-our-free-model@1.4.4}"
 PLUGIN_MOBILE_UI="${PLUGIN_MOBILE_UI:-dsh-web-mobile@3.0.6}"
 ROOT_DEBS="${ROOT_DEBS:-nodejs}"              # 打种根包（逗号分隔；Termux 的 nodejs 自带 npm）
 WORK="${WORK:-$REPO_ROOT/build/seed-$ARCH}"
@@ -319,7 +321,7 @@ fs.writeFileSync(p,JSON.stringify(d,null,2));
     [[ "$links" -eq 0 ]] || { log "错误：种子树含 $links 个 symlink，违反 profile 闸门"; find "$seed" -type l | head; exit 1; }
     mkdir -p "$WORK/stage/share"
     rm -rf "$WORK/stage/share/dsh-seed"
-    cp -a "$WORK/dshseed/home" "$WORK/stage/share/dsh-seed"
+    cp -a "$WORK/dshseed/home/." "$WORK/stage/share/dsh-seed"
     du -sh "$WORK/stage/share/dsh-seed"
 }
 
